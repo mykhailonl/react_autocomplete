@@ -1,15 +1,20 @@
-import { useState, useRef, useCallback } from 'react';
+import React, { useCallback, useRef, useState } from 'react';
 import './App.scss';
 import { peopleFromServer } from './data/people';
 import { Person } from './types/Person';
 import debounce from 'lodash.debounce';
 import { AutoComplete } from './components/Autocomplete';
-import { NoMatch } from './components/Nomatch';
 
-export const App: React.FC = () => {
+type AppProps = {
+  delay?: number;
+  onSelected?: (person: Person | null) => void;
+};
+
+export const App: React.FC<AppProps> = ({ delay = 300, onSelected }) => {
   const [selectedPerson, setSelectedPerson] = useState<Person | null>(null);
   const [isDropdownActive, setIsDropdownActive] = useState(false);
-  const [suggestions, setSuggestions] = useState<Person[]>(peopleFromServer);
+  const [suggestions, setSuggestions] = useState<Person[]>([]);
+  const lastSearchQueryRef = useRef('');
 
   const { name, born, died } = selectedPerson || {
     name: '',
@@ -23,29 +28,58 @@ export const App: React.FC = () => {
 
   const inputRef = useRef<HTMLInputElement>(null);
 
-  const handleDropdownClick = (isActive: boolean) => {
-    setTimeout(() => {
-      setIsDropdownActive(isActive);
-    }, 200);
-  };
+  const filterPeople = useCallback(() => {
+    const inputValue = inputRef.current?.value.toLowerCase().trim() || '';
 
-  const filterPeople = () => {
-    const inputValue = inputRef.current?.value.toLowerCase() || '';
+    if (inputValue === lastSearchQueryRef.current) {
+      return;
+    }
 
-    setSuggestions(
-      peopleFromServer.filter(person =>
-        person.name.toLowerCase().includes(inputValue.trim()),
-      ),
-    );
+    lastSearchQueryRef.current = inputValue;
 
-    handleDropdownClick(true);
-  };
+    if (inputValue === '') {
+      setSuggestions(peopleFromServer);
+    } else {
+      const filteredPeople = peopleFromServer.filter(person =>
+        person.name.toLowerCase().includes(inputValue),
+      );
 
-  const debounceFilter = useCallback(debounce(filterPeople, 1000), []);
+      setSuggestions(filteredPeople);
+    }
+
+    setIsDropdownActive(true);
+  }, [setSuggestions, setIsDropdownActive]);
+
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const debounceFilter = useCallback(debounce(filterPeople, delay), [
+    filterPeople,
+    delay,
+  ]);
+
   const handleQueryChange = () => {
-    setSelectedPerson(null);
+    if (selectedPerson) {
+      setSelectedPerson(null);
+      onSelected?.(null);
+    }
+
+    setIsDropdownActive(false);
+
     debounceFilter();
-    handleDropdownClick(false);
+  };
+
+  const handleInputFocus = () => {
+    const inputValue = inputRef.current?.value.toLowerCase().trim() || '';
+
+    if (inputValue === '') {
+      setSuggestions(peopleFromServer);
+      lastSearchQueryRef.current = '';
+    }
+
+    setIsDropdownActive(true);
+  };
+
+  const handleInputBlur = () => {
+    setIsDropdownActive(false);
   };
 
   const selectPersonFromTheList = (
@@ -60,11 +94,12 @@ export const App: React.FC = () => {
     if (person && inputRef.current) {
       setSelectedPerson(person);
       inputRef.current.value = person.name;
+      setIsDropdownActive(false);
+      onSelected?.(person);
     }
   };
 
-  const conditionShowDropdown =
-    suggestions.length !== 0 && isDropdownActive && selectedPerson === null;
+  const shouldShowDropdown = isDropdownActive && !selectedPerson;
 
   return (
     <div className="container">
@@ -82,19 +117,18 @@ export const App: React.FC = () => {
               defaultValue=""
               onChange={handleQueryChange}
               data-cy="search-input"
-              onFocus={() => handleDropdownClick(true)}
-              onBlur={() => handleDropdownClick(false)}
+              onFocus={handleInputFocus}
+              onBlur={handleInputBlur}
             />
           </div>
 
           <AutoComplete
             suggestions={suggestions}
-            conditionShowDropdown={conditionShowDropdown}
+            shouldShowDropdown={shouldShowDropdown}
             selectPersonFromTheList={selectPersonFromTheList}
+            inputValue={inputRef.current?.value.trim() || ''}
           />
         </div>
-
-        {suggestions.length === 0 && <NoMatch />}
       </main>
     </div>
   );
